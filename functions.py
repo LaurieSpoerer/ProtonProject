@@ -18,6 +18,7 @@ from tqdm import tqdm
 path1 = 'C:/Users/lauri/OneDrive/Uni stuff/Year 4/Proton Detection Project/Code/Preliminary Code/Sam_Data/' #path to the cal data
 cal_img_dir = path1+'Images/' #calibration images
 cal_dark_dir = path1+'Dark/Dark_Baseline_28ms/' #dark images from calibration
+cal_dark_dir_multi = path1+'Dark/Dark multi/'
 
 
 path2 = 'C:/Users/lauri/OneDrive/Uni stuff/Year 4/Proton Detection Project/Code/Preliminary Code/Munich_MicrobeamShare/' #path to the data
@@ -153,10 +154,22 @@ def get_calibration_data_multiple_ROI(datas, dark_data, y1,y2, x1,x2): # ^ but i
     mean_datas_errors = []
     dark_mean = np.mean(getarray(dark_data)[0], axis = 0)
     for x in tqdm(sort(os.listdir(datas))):
-        mean_datas_values.append(get_array_mean(get_mean_array(get_dark_sub((getarray(datas+x+'/'))[0], dark_mean))[y1:y2, x1:x2]))
-        mean_datas_errors.append(get_array_error(get_mean_array(get_dark_sub((getarray(datas+x+'/'))[0], dark_mean))[y1:y2, x1:x2]))
-        
-    del dark_mean
+        mean_array = (get_mean_array(get_dark_sub(getarray(datas+x+'/')[0], dark_mean))[y1:y2, x1:x2])
+        mean_datas_values.append(get_array_mean(mean_array))
+        mean_datas_errors.append(get_array_error(mean_array))
+    del dark_mean    
+    return mean_datas_values, mean_datas_errors
+
+def get_calibration_data_multiple_2_ROI(datas, dark_datas, y1,y2, x1,x2): # ^ but in a chosen ROI
+    mean_datas_values = []
+    mean_datas_errors = []
+    for x in tqdm(np.arange(len(sort(os.listdir(datas))))):
+        dark_mean = np.mean(getarray(cal_dark_dir_multi+os.listdir(dark_datas)[x]+'/')[0], axis = 0)
+        mean_array = (get_mean_array(get_dark_sub(getarray(datas+os.listdir(datas)[x]+'/')[0], dark_mean))[y1:y2, x1:x2])
+        del dark_mean
+        mean_datas_values.append(get_array_mean(mean_array))
+        mean_datas_errors.append(get_array_error(mean_array))
+
     return mean_datas_values, mean_datas_errors
 
 def get_calibration_data_multiple_array(data_arrays, dark_arrays): #Finds the mean dark subbed value and error of multiple image sets seperately
@@ -179,11 +192,10 @@ def get_calibration_data_multiple_array_ROI(data_arrays, dark_arrays, y1,y2, x1,
     del dark_mean
     return mean_datas_values, mean_datas_errors
 
-def get_dose_values(currents, signal_vals, dose, current): #Finds the dose values of signals from a known dose at a known current
-    lobf_func = getlobf(currents, signal_vals)[2] #Need some signals at some currents for lobf function to calc signal at known dose current
-    signal = lobf_func(current)
-    prop_const = dose/signal
-    dose_values = [i*prop_const for i in signal_vals]
+def get_dose_values(currents, kdose, kcurrent): #Finds the dose values of signals from a known dose at a known current
+    prop_const = kdose/kcurrent
+    dose_values = [i*prop_const for i in currents]
+    
     return dose_values
 
 #----------------------------------------------------------------------------------------------------------
@@ -278,6 +290,7 @@ def get_row_ROI(row, threshold):
 def get_peaks_valleys(row): #finds peaks, valleys, and pdvr
     final_peaks = []
     final_valleys = []
+    temp_valleys = []
     peaks = scipy.signal.find_peaks(row)[0]
     valleys = scipy.signal.find_peaks(-row)[0]
     for i in tqdm(peaks):
@@ -313,15 +326,17 @@ def get_peaks_valleys(row): #finds peaks, valleys, and pdvr
         x_norm_p = np.linspace(0, len(xp), 100)
         #x1 = int((np.argmax(gaussian(x_norm_p, *poptp)) - left_lim_p)/2)
         #x2 = int((np.argmax(gaussian(x_norm_p, *poptp)) - right_lim_p)/2)
-        plt.plot(np.linspace(i-left_lim_p, i+right_lim_p, 100), gaussian(x_norm_p, *poptp), linestyle='dashed')
+        plt.plot(np.linspace(+i-left_lim_p, i+right_lim_p, 100), gaussian(x_norm_p, *poptp), linestyle='dashed')
         final_peaks.append(np.max(gaussian(x_norm_p, *poptp)))
-    
+        temp_valleys.append(i+right_lim_p)
+    #plt.plot(np.arange(len(row)), row)
+    #plt.show()
     
         
     for i in tqdm(valleys):
         for j in np.arange(100):
             try:
-                if row[j-i] > row[j-i-1]:
+                if row[i-j] > row[i-j-1]:
                     left_lim_v=j
                     break
                 else:
@@ -350,10 +365,92 @@ def get_peaks_valleys(row): #finds peaks, valleys, and pdvr
         poptv, _ = scipy.optimize.curve_fit(gaussian, xv, 1/yv)
         x_norm_v = np.linspace(0, len(xv)-1, 100)
         final_valleys.append(1/np.max((gaussian(x_norm_v, *poptv))))
-        
+        #plt.plot(np.linspace(+i-left_lim_v, i+right_lim_v, 100), gaussian(x_norm_v, *poptv), linestyle='dashed')
+    plt.plot(np.arange(len(row)), row)
+    plt.show()
+
     pvdr = (np.mean(final_peaks))/(np.mean(final_valleys))    
     
+    temp_pvdr = np.mean(final_peaks)/np.mean(temp_valleys)
+    
     print(f"The PVDR for this row is: {pvdr}")
+    print(f"The PVDR could be: {temp_pvdr}")
+    return final_peaks, final_valleys
+
+
+def peak_valley_plotter(row_full, left, right): #finds peaks, valleys, and pdvr
+    row = row_full[left:right]
+    peaks = scipy.signal.find_peaks(row)[0]
+    valleys = scipy.signal.find_peaks(-row)[0]
+    for i in tqdm(peaks):
+        for j in np.arange(100):
+            try:
+                if row[i-j] < row[i-j-1]:
+                    left_lim_p=j
+                    break
+                else:
+                    continue
+            except IndexError:
+                continue
+            
+        for j in np.arange(100):
+            try:
+                if row[i+j] < row[i+j+1]:
+                    right_lim_p=j
+                    break
+                else:
+                    continue
+            except IndexError:
+                continue
+                
+        if left_lim_p == 1:
+            continue
+        if right_lim_p == 1:
+            continue
+        
+        yp = row[i-left_lim_p:i+right_lim_p]
+        xp = np.arange(len(row[i-left_lim_p:i+right_lim_p]))
+        
+        poptp, _ = scipy.optimize.curve_fit(gaussian, xp, yp)
+        x_norm_p = np.linspace(0, len(xp), 100)
+        
+        plt.plot(np.linspace(+i-left_lim_p, i+right_lim_p, 100), gaussian(x_norm_p, *poptp), linestyle='dashed')
+        
+    for i in tqdm(valleys):
+        for j in np.arange(100):
+            try:
+                if row[i-j] > row[i-j-1]:
+                    left_lim_v=j
+                    break
+                else:
+                    continue
+            except IndexError:
+                continue
+            
+        for j in np.arange(100):
+            try:
+                if row[i+j] > row[i+j+1]:
+                    right_lim_v=j
+                    break
+                else:
+                    continue
+            except IndexError:
+                continue
+                
+        if left_lim_v == 1:
+            continue
+        if right_lim_v == 1:
+            continue
+
+        yv = row[i-left_lim_v:i+right_lim_v]
+        xv = np.arange(len(row[i-left_lim_v:i+right_lim_v]))
+
+        poptv, _ = scipy.optimize.curve_fit(gaussian, xv, 1/yv)
+        x_norm_v = np.linspace(0, len(xv)-1, 100)
+        #plt.plot(np.linspace(+i-left_lim_v, i+right_lim_v, 100), gaussian(x_norm_v, *poptv), linestyle='dashed')
+    plt.plot(np.arange(len(row)),row)    
+    plt.show()
+        
 
 #---------------------------------------------------------------------------------------------------
 
@@ -428,38 +525,222 @@ def experiment_pvdr(data_dir, dark_dir):
     del mean_img
     del x1
     del x2
-#    happy = False
-#    while not happy:
-#        y1 = float(input("Enter the upper y limit: "))
-#        y2 = float(input("Enter the lower y limit: "))
-#        x1 = float(input("Enter the left x limit: "))
-#        x2 = float(input("Enter the right x limit: "))
-#        mean_img_ROI = mean_img[y1:y2,x1:x2]
-#        plt.imshow
-#        plt.show()
-#        repeat_y_n = input("Is this what you want? (y/n)")
-#        if repeat_y_n == 'y':
-#            happy = True
-                   
+
     print("This is the image we are using for the PVDR")
     plt.imshow(mean_img_rows)
     plt.show()
     mean_row = np.mean(mean_img_rows,axis=0)
     del mean_img_rows
     print("This is the plot of the mean row against position (not pixel number on detector)")
-    plt.plot(np.arange(len(mean_row)),mean_row)
-    get_peaks_valleys(mean_row)
+    #plt.plot(np.arange(len(mean_row)),mean_row)
+    peaks, valleys = get_peaks_valleys(mean_row)
     #print(f"The PVDR from this image is: {PVDR}")
     plt.show()
-    del mean_row
     
     
+    qq = input("Would you like to look closer at the peaks and valleys? (y/n): ")
+    if qq=='y':
+        blah=False
+        while not blah:
+            try:
+                left = float(input("What pixel do you want to start from?: "))
+            except ValueError:
+                print("Enter a number, restarting..")
+                continue
+            try:
+                right = float(input("What pixel do you want to end?: "))
+            except ValueError:
+                print("Enter a number, restarting..")
+                continue
+            try:
+                peak_valley_plotter(mean_row,left,right)
+            except ValueError:
+                print("Didn't work, not sure why, try again")
+                continue
+            
+        
+            
+    return peaks, valleys
         
     
     
     
 def experiment_cal(cal_data_dir,cal_dark_dir):
     darks = getarray(cal_dark_dir)[0]
+    dark_mean = np.mean(darks,axis=0)
+    del darks
+    mean_dark_subs = []
+    ini_cal_data = os.listdir(cal_data_dir)[0]
+    mean_dark_subs.append(np.mean(get_dark_sub(getarray(cal_data_dir+ini_cal_data+'/')[0], dark_mean),axis=0))
+    del dark_mean
+    mean_img = np.mean(mean_dark_subs,axis=0)
+    ylen = len(mean_img)
+    xlen = len(mean_img[0,:])
+    yrange = np.arange((ylen))
+    xrange = np.arange((xlen))
+    print("This is the first dark subtracted image, use to find ROI:")
+    plt.imshow(mean_img)
+    plt.show()
+    #Going to temporaily get user to enter approx coords
+    happy = False
+    while not happy:
+        crop = copy.deepcopy(mean_img)
+        try:
+            y = int(input("Please enter approx centre y coord of beam: "))
+        except ValueError:
+            print("Enter a number, restarting...")
+            continue
+            
+        try:
+            y_w = int(input("Enter a value from 0 to the distance from y coord to closest edge: "))
+        except ValueError:
+            print("Enter a number, restarting...")
+            continue
+            
+        try:
+            x = int(input("Please enter approx centre x coord of beam: "))
+        except ValueError:
+            print("Enter a number, restarting...")
+            continue
+            
+        try:
+            x_w = int(input("Enter a value from 0 to the distance from x coord to closest edge: "))
+        except ValueError:
+            print("Enter a number, restarting...")
+            continue
+            
+        try:
+            threshold = int(input("What threshold shall I use to find the beam?: "))
+        except ValueError:
+            print("Enter a number, restarting...")
+            continue
+        x1=1
+        del x1
+        xl, xr = get_row_ROI(np.mean(row_select(mean_img, y, y_w),axis=0),threshold)[1:]
+        x1=1
+        del x1
+        crop = copy.deepcopy(mean_img)
+        yu, yd = get_row_ROI(np.mean(col_select(mean_img, x, x_w),axis=0),threshold)[1:]
+        plt.imshow(crop[yu:yd,xl:xr], extent = [xrange[xl], xrange[xr], yrange[yd], yrange[yu]])
+        plt.show()
+        del crop
+        x1=1
+        del x1
+        check = input("Is this good? (y/n): ")
+        if check == 'y':
+            happy = True
+            new_img = mean_img[yu:yd,xl:xr]
+            del mean_img
+    
+    q2 = input("Would you like to crop it any more? (y/n): ")
+    if q2 =='y':
+        happy2 = False
+        while not happy2:
+            try:
+                yupper = int(input("Please enter how much you want to crop the top: "))
+            except ValueError:
+                print("Enter a number, restarting...")
+                continue
+                
+            try:
+                ylower = int(input("Please enter how much you want to crop the bottom: "))
+            except ValueError:
+                print("Enter a number, restarting...")
+                continue
+            
+            try:
+                xleft = int(input("Please enter how much you want to crop the left: "))
+            except ValueError:
+                print("Enter a number, restarting...")
+                continue
+                
+            try:
+                xright = int(input("Please enter how much you want to crop the right: "))
+            except ValueError:
+                print("Enter a number, restarting...")
+                continue
+    
+            crop2 = copy.deepcopy(new_img)
+            plt.imshow(crop2[yupper:-ylower,xleft:-xright], extent = [xrange[xl+xleft],xrange[xr-xright],yrange[yd-ylower],yrange[yu+yupper]])
+            plt.show()
+            del crop2
+            check2 = input("Are you happy with this? (y/n): ")
+            if check2 == 'y':
+                happy2 = True
+    
+    else:
+        yupper = 0
+        ylower = 0
+        xleft = 0
+        xright = 0
+    
+    
+    print("This set of coordinates will be used to calculate the means of the calibration images:")
+    print(f"x: {xl}+{xleft} to {xr}-{xright}")
+    print(f"y: {yu}+{yupper} to {yd}-{ylower}")
+    
+    
+    ree = False
+    while not ree:
+        cur = input("Please enter the list of currents in order of the directory folder: ")
+        rents = cur.split(',')
+        try:
+            currents = [float(i.strip()) for i in rents]
+        except ValueError:
+            print("Please make sure all the values are numbers, restarting...")
+            ree = False
+            continue
+        
+        if len(currents) == len(os.listdir(cal_data_dir)):
+            ree = True
+            continue
+        
+        else:
+            print("The number of currents entered does not equal the actual number of currents")
+            ree = False
+    
+    means, means_errs = get_calibration_data_multiple_ROI(cal_data_dir,cal_dark_dir, yu+yupper, yd-ylower, xl+xleft, xr-xright)
+    plt.errorbar(currents, means, yerr = means_errs, label='Data', fmt='b.')
+    plt.plot(getlobf(currents,means)[0],getlobf(currents,means)[1], label='LOBF', linestyle='dashed')
+    plt.xlabel('Current (mA)')
+    plt.ylabel('Signal')
+    plt.legend()
+    plt.show()
+    
+    tee = False
+    while not tee:
+        try:
+            kdose = float(input("Please enter the dose at the known current: "))
+        except ValueError:
+            print("Please make sure all the values are numbers, restarting...")
+            tee = False
+            continue
+        
+        try:
+            kcurrent = float(input("Please enter the known current: "))
+        except ValueError:
+            print("Please make sure all the values are numbers, restarting...")
+            tee = False
+            continue
+        
+        test = input(f"The known Dose is {kdose} Gy at {kcurrent} mA. Is this correct? (y/n): ")
+        if test =='y':
+            tee = True
+
+    
+    dose_rate = get_dose_values(currents, kdose, kcurrent)
+    
+    plt.plot(dose_rate, means, 'bo', label = 'Signal vs Dose Rate Data')
+    plt.plot(getlobf(dose_rate,means)[0], getlobf(dose_rate,means)[1],linestyle='dashed',label='LOBF')
+    plt.xlabel('Dose Rate (Gy/s)')
+    plt.ylabel('Signal')
+    plt.legend()
+    plt.show()
+    
+    return means, means_errs#, dose_conversion
+
+def experiment_cal_multi_dark(cal_data_dir,cal_dark_dir_multi):
+    darks = getarray(cal_dark_dir_multi+os.listdir(cal_dark_dir_multi)[0]+'/')[0]
     dark_mean = np.mean(darks,axis=0)
     del darks
     mean_dark_subs = []
@@ -552,15 +833,26 @@ def experiment_cal(cal_data_dir,cal_dark_dir):
             except ValueError:
                 print("Enter a number, restarting...")
                 continue
-                
+    
             crop2 = copy.deepcopy(new_img)
             plt.imshow(crop2[yupper:-ylower,xleft:-xright], extent = [xrange[xl+xleft],xrange[xr-xright],yrange[yd-ylower],yrange[yu+yupper]])
             plt.show()
+            del crop2
             check2 = input("Are you happy with this? (y/n): ")
             if check2 == 'y':
                 happy2 = True
-    del crop2
-    print("This set of coordinates will be used to calculate the means of the calibration images")
+    
+    else:
+        yupper = 0
+        ylower = 0
+        xleft = 0
+        xright = 0
+    
+    
+    print("This set of coordinates will be used to calculate the means of the calibration images:")
+    print(f"x: {xl}+{xleft} to {xr}-{xright}")
+    print(f"y: {yu}+{yupper} to {yd}-{ylower}")
+    
     
     ree = False
     while not ree:
@@ -581,8 +873,8 @@ def experiment_cal(cal_data_dir,cal_dark_dir):
             print("The number of currents entered does not equal the actual number of currents")
             ree = False
     
-    means, means_errs = get_calibration_data_multiple_ROI(cal_data_dir,cal_dark_dir, yu+yupper, yd-ylower, xl+xleft, xr-xright)
-    plt.errorbar(currents, means, yerr = means_errs, label='Data')
+    means, means_errs = get_calibration_data_multiple_2_ROI(cal_data_dir,cal_dark_dir_multi, yu+yupper, yd-ylower, xl+xleft, xr-xright)
+    plt.errorbar(currents, means, yerr = means_errs, label='Data', fmt='b.')
     plt.plot(getlobf(currents,means)[0],getlobf(currents,means)[1], label='LOBF', linestyle='dashed')
     plt.xlabel('Current (mA)')
     plt.ylabel('Signal')
@@ -605,17 +897,18 @@ def experiment_cal(cal_data_dir,cal_dark_dir):
             tee = False
             continue
         
-        test = input(f"The known Dose is {kdose} Gy at {kcurrent} mA. Is this correct?")
+        test = input(f"The known Dose is {kdose} Gy at {kcurrent} mA. Is this correct? (y/n): ")
         if test =='y':
             tee = True
+
     
+    dose_rate = get_dose_values(currents, kdose, kcurrent)
     
-    doses = get_dose_values(currents, means, kdose, kcurrent)
-    
-    plt.plot(doses, currents, label = 'Dose converted data')
-    plt.plot(getlobf(currents,doses)[0], getlobf(currents,doses)[1],linestyle='dashed',label='LOBF')
-    plt.xlabel('Current (mA)')
-    plt.ylabel('Dose (Gy)')
+    plt.plot(dose_rate, means, 'bo', label = 'Signal vs Dose Rate Data')
+    plt.plot(getlobf(dose_rate,means)[0], getlobf(dose_rate,means)[1],linestyle='dashed',label='LOBF')
+    plt.xlabel('Dose Rate (Gy/s)')
+    plt.ylabel('Signal')
+    plt.legend()
     plt.show()
     
     return means, means_errs
